@@ -1,108 +1,110 @@
-# PS-600 BLE プロトコル解析ノート
+# PS-600 BLE Protocol Reference
 
-EPSON PULSENSE PS-600 の BLE 通信プロトコルを、公式 Android アプリ（PULSENSE View 2.2.6）の APK を jadx で逆コンパイルして解析した結果をまとめたものです。
+This document summarizes the BLE communication protocol of the **EPSON PULSENSE PS-600**, reverse-engineered by decompiling the official Android app (PULSENSE View 2.2.6) with jadx.
+
+> 日本語版 → [PROTOCOL_ja.md](PROTOCOL_ja.md)
 
 ---
 
-## BLE サービス・キャラクタリスティック
+## GATT Service and Characteristics
 
-すべてのキャラクタリスティックは単一の GATT サービスに属します。
+All characteristics belong to a single GATT service.
 
-**サービス UUID**
+**Service UUID**
 ```
 b5a60000-2ed3-e993-896b-cceb986f8d73
 ```
 
-| 役割 | UUID | 方向 | プロパティ |
+| Role | UUID | Direction | Properties |
 |---|---|---|---|
 | DL_SIZE | b5a60020-... | app → device | Write (with response) |
 | DL_DATA | b5a60022-... | app → device | Write Without Response |
-| DL_ORDER | b5a60021-... | device → app | Indicate（送信 ACK） |
-| UL_SIZE | b5a60010-... | device → app | Indicate（受信データ総サイズ通知） |
-| UL_DATA | b5a60012-... | device → app | Notify（受信パケット） |
-| UL_ORDER | b5a60011-... | app → device | Write (with response)（受信 ACK） |
+| DL_ORDER | b5a60021-... | device → app | Indicate (TX ACK) |
+| UL_SIZE | b5a60010-... | device → app | Indicate (total response size) |
+| UL_DATA | b5a60012-... | device → app | Notify (incoming packets) |
+| UL_ORDER | b5a60011-... | app → device | Write (with response) (RX ACK) |
 | CONTROL_POINT | b5a60030-... | app → device | Write (with response) |
-| DATA_EVENT | b5a60031-... | device → app | Notify（SummaryReady 等のイベント） |
+| DATA_EVENT | b5a60031-... | device → app | Notify (SummaryReady etc.) |
 
-UUID の末尾はすべて共通: `-2ed3-e993-896b-cceb986f8d73`
-
----
-
-## 接続手順
-
-```
-1. BleakClient / Web Bluetooth で接続
-2. DL_ORDER / UL_DATA / UL_SIZE / DATA_EVENT の通知を購読
-3. ConnectCommand を送信
-4. GetIndexTable (MeasurementLog) を送信
-5. GetIndexTable (MeasurementSummary) を送信
-6. 以降、レコードごとに GetSize → GetBody を繰り返す
-7. 切断前に CONTROL_POINT へ UNLOCK_MUTEX (0x20) を書き込む
-```
-
-ConnectCommand の直後に必ず IndexTable を取得する順序が必要です。ConnectCommand → データコマンド（IndexTable なし）の順序ではデバイスが切断します。
+The UUID suffix is the same for all: `-2ed3-e993-896b-cceb986f8d73`
 
 ---
 
-## パケットフレーミング
-
-すべてのコマンド・レスポンスは **20 バイト固定長パケット**に分割されます。
+## Connection Sequence
 
 ```
-byte 0: フラグ + シーケンス番号 + ペイロード長 (上位1bit)
-  bit 7: IS_FIRST (先頭パケット)
-  bit 6: IS_LAST  (末尾パケット)
-  bit 5-1: シーケンス番号 (0〜31)
-  bit 0: ペイロード長 上位1bit
-
-byte 1: ペイロード長 下位8bit (最大 255、実質 18 で固定)
-
-byte 2〜19: ペイロード (最大 18 バイト、未使用部分は 0xAA で埋める)
+1. Connect via Bleak / Web Bluetooth
+2. Subscribe to notifications on DL_ORDER, UL_DATA, UL_SIZE, DATA_EVENT
+3. Send ConnectCommand
+4. Send GetIndexTable (MeasurementLog)
+5. Send GetIndexTable (MeasurementSummary)
+6. For each record: send GetSize → GetBody
+7. Before disconnecting, write UNLOCK_MUTEX (0x20) to CONTROL_POINT
 ```
 
-### パケット分割
-
-コマンドは 18 バイト単位でパケットに分割します。シーケンス番号は 0〜31 を循環します（32 パケットで 1 ブロック）。
+ConnectCommand **must** be followed by an IndexTable command. Sending a data command (e.g. GetBody) without first fetching the IndexTable causes the device to disconnect.
 
 ---
 
-## 送受信フロー
+## Packet Framing
 
-### 送信（app → device）
-
-```
-1. DL_SIZE に コマンド総バイト数 (uint32 LE) を write
-2. DL_DATA に パケットを順番に write-without-response（パケット間に 10ms 待機）
-3. 32 パケット送信するごとに DL_ORDER の Indicate を待つ (ACK)
-4. DL_ORDER が 0xAA (ACK_OK) なら次のブロックへ
-   0〜31 なら再送要求（その seq から再送）
-5. 全パケット送信後、DL_ORDER の最終 ACK を待つ
-```
-
-### 受信（device → app）
+All commands and responses are split into **20-byte fixed-length packets**.
 
 ```
-1. デバイスが UL_SIZE で総バイト数を通知（無視してよい）
-2. デバイスが UL_DATA でパケットを送信してくる
-3. 32 パケット受信するごとに UL_ORDER へ 0xAA を write（ブロック ACK）
-4. IS_LAST パケットを受信したら UL_ORDER へ 0xAA を write（最終 ACK）
-5. 受信完了
+byte 0: flags + sequence number + payload length (upper 1 bit)
+  bit 7: IS_FIRST (first packet of a message)
+  bit 6: IS_LAST  (last packet of a message)
+  bit 5-1: sequence number (0–31)
+  bit 0: payload length, upper bit
+
+byte 1: payload length, lower 8 bits (practical maximum is 18)
+
+byte 2–19: payload (up to 18 bytes; unused bytes filled with 0xAA)
 ```
 
-### ⚠️ 重要バグと修正
+### Packet splitting
 
-**IS_LAST と seq==31 が同時に立つパケット（ブロック境界が最終パケットと一致する場合）に 2 回 ACK を送るとデバイスが切断する。**
+Commands are split into 18-byte chunks. The sequence number cycles 0–31 (32 packets = 1 block).
 
-デバイスはブロック ACK（seq==31）を受け取った時点で切断するため、IS_LAST の ACK を送る前に切断される。
+---
+
+## Send/Receive Flow
+
+### Sending (app → device)
+
+```
+1. Write total command byte count (uint32 LE) to DL_SIZE
+2. Write packets sequentially to DL_DATA (write-without-response, 10ms between packets)
+3. After every 32 packets, wait for an Indicate on DL_ORDER (block ACK)
+4. If DL_ORDER is 0xAA (ACK_OK), proceed to next block
+   If it is 0–31, re-send from that sequence number
+5. After all packets are sent, wait for the final ACK on DL_ORDER
+```
+
+### Receiving (device → app)
+
+```
+1. Device notifies total response size on UL_SIZE (can be ignored)
+2. Device sends packets on UL_DATA
+3. After every 32 received packets, write 0xAA to UL_ORDER (block ACK)
+4. After receiving the IS_LAST packet, write 0xAA to UL_ORDER (final ACK)
+5. Transfer complete
+```
+
+### ⚠️ Critical bug and fix
+
+**When a packet has both IS_LAST and seq==31 set (the last packet of a message falls exactly on a block boundary), sending two ACKs causes the device to disconnect.**
+
+The device disconnects upon receiving the block ACK (seq==31), so the subsequent IS_LAST ACK write raises a BLE error.
 
 ```python
-# 誤り（2回 ACK を送る）
+# WRONG — sends two ACKs
 if seq == 31:
-    await ul_ack()   # ← デバイスがここで切断
+    await ul_ack()   # ← device disconnects here
 if is_last:
     await ul_ack()   # ← BleakError: disconnected
 
-# 正しい（IS_LAST のときはブロック ACK をスキップ）
+# CORRECT — skip block ACK when IS_LAST is set
 if seq == 31 and not is_last:
     await ul_ack()
 if is_last:
@@ -111,19 +113,19 @@ if is_last:
 
 ---
 
-## コマンド仕様
+## Command Specification
 
-すべてのコマンドは共通ヘッダー（5 バイト）から始まります。
+All commands start with a 5-byte common header.
 
 ```
 byte 0:   CommandId (uint8)
 byte 1-4: PayloadSize (uint32 LE)
-byte 5〜: ペイロード
+byte 5+:  payload
 ```
 
-### CommandId
+### CommandId values
 
-| 名前 | 値 |
+| Name | Value |
 |---|---|
 | CONNECT | 0x00 |
 | DISCONNECT | 0x01 |
@@ -138,7 +140,7 @@ byte 5〜: ペイロード
 [0x00][0x00 0x00 0x00 0x00]
 ```
 
-ペイロードなし（5 バイト固定）。接続後最初に送る必須コマンド。
+No payload (5 bytes total). Must be the first command sent after connecting.
 
 ### DisconnectCommand
 
@@ -152,14 +154,14 @@ byte 5〜: ペイロード
 [0x20][0x04 0x00 0x00 0x00][ClassId(2B LE)][ElementId=0x02][Filter(1B)]
 ```
 
-**IndexTableFilter 値**
+**IndexTableFilter values**
 
-| 名前 | 値 | 意味 |
+| Name | Value | Meaning |
 |---|---|---|
-| None | 0x00 | すべてのレコード |
-| NotUploaded | 0x01 | 未アップロードのみ |
-| Uploaded | 0x02 | アップロード済みのみ |
-| PartiallyUploaded | 0x03 | 部分アップロードのみ |
+| None | 0x00 | All records |
+| NotUploaded | 0x01 | Not yet uploaded |
+| Uploaded | 0x02 | Already uploaded |
+| PartiallyUploaded | 0x03 | Partially uploaded |
 
 ### GetDataClassBodySize
 
@@ -179,9 +181,9 @@ byte 5〜: ペイロード
 [0x21][0x06 0x00 0x00 0x00][ClassId(2B LE)][ElementId=0x42][Index(2B LE)][Flag(1B)]
 ```
 
-**UploadFlag 値**
+**UploadFlag values**
 
-| 名前 | 値 |
+| Name | Value |
 |---|---|
 | Uploaded | 0x00 |
 | NotUploaded | 0x01 |
@@ -191,147 +193,147 @@ byte 5〜: ペイロード
 
 ## DataClassElementId
 
-| 名前 | 値 | 意味 |
+| Name | Value | Meaning |
 |---|---|---|
-| BODY | 0x00 | レコード本体 |
-| COUNT | 0x01 | 件数 |
-| INDEX_TABLE | 0x02 | インデックステーブル |
-| BODY_SIZE | 0x41 | レコードサイズ（バイト数） |
-| UPLOAD_FLAG | 0x42 | アップロードフラグ |
+| BODY | 0x00 | Record body data |
+| COUNT | 0x01 | Number of records |
+| INDEX_TABLE | 0x02 | Index table |
+| BODY_SIZE | 0x41 | Record size in bytes |
+| UPLOAD_FLAG | 0x42 | Upload status flag |
 
 ---
 
-## データクラス ID
+## Data Class IDs
 
-| 名前 | 値 (uint16 LE) | 内容 |
+| Name | Value (uint16 LE) | Contents |
 |---|---|---|
-| MeasurementLog | 0x5100 (=20736) | 心拍データ本体（可変長） |
-| MeasurementSummary | 0x5110 (=20752) | セッション情報・タイムスタンプ（128B 固定） |
+| MeasurementLog | 0x5100 (= 20736) | Heart rate body data (variable length) |
+| MeasurementSummary | 0x5110 (= 20752) | Session metadata and timestamp (128 bytes fixed) |
 
 ---
 
-## レスポンス共通ヘッダー
+## Response Common Header
 
 ```
-byte 0:   CommandId (echo)
+byte 0:   CommandId (echoed)
 byte 1-4: PayloadSize (uint32 LE)
-byte 5:   ResultCode (0x00 = 成功)
+byte 5:   ResultCode (0x00 = success)
 byte 6-7: ClassId (uint16 LE)
 byte 8:   ElementId
-...       コマンドごとの追加フィールド
+...       command-specific fields
 ```
 
-### IndexTable レスポンス
+### IndexTable response
 
 ```
-byte 0-4:  共通ヘッダー
+byte 0-4:  common header
 byte 5:    ResultCode
 byte 6-7:  ClassId
 byte 8:    ElementId (0x02)
 byte 9:    Filter
-byte 10-13: TableSize (uint32 LE, インデックス数 × 2 バイト)
-byte 14〜: インデックス配列 (uint16 LE × N)
+byte 10-13: TableSize (uint32 LE, number of indices × 2 bytes)
+byte 14+:  index array (uint16 LE × N)
 ```
 
-### GetBodySize レスポンス
+### GetBodySize response
 
 ```
-byte 0-4:  共通ヘッダー
+byte 0-4:  common header
 byte 5:    ResultCode
 byte 6-7:  ClassId
 byte 8:    ElementId (0x41)
 byte 9-10: Index (uint16 LE)
-byte 11-14: Size (uint32 LE, バイト数)
+byte 11-14: Size (uint32 LE, bytes)
 ```
 
-### GetBody レスポンス
+### GetBody response
 
 ```
-byte 0-4:  共通ヘッダー
+byte 0-4:  common header
 byte 5:    ResultCode
 byte 6-7:  ClassId
 byte 8:    ElementId (0x00)
 byte 9-10: Index (uint16 LE)
 byte 11-14: Offset (uint32 LE)
 byte 15-18: Size (uint32 LE)
-byte 19〜: ボディデータ
+byte 19+:  body data
 ```
 
 ---
 
-## MeasurementLog ボディのデータ形式
+## MeasurementLog Body Format
 
-4 バイト × サンプル数の配列。1 サンプル = 1 分。
+Array of 4-byte entries, one per sample. 1 sample = 1 minute.
 
 ```
-byte 0: 心拍数 (BPM)  ※ 0x00 または 0xFF は無効サンプル
-byte 1: flags1 (詳細不明)
-byte 2: 不明
-byte 3: flags3 (詳細不明)
+byte 0: heart rate (BPM)  — 0x00 or 0xFF means invalid sample
+byte 1: flags1 (details unknown)
+byte 2: unknown
+byte 3: flags3 (details unknown)
 ```
 
-実測値は 50〜200 BPM の範囲。
+Observed values range from 50 to 200 BPM.
 
 ---
 
-## MeasurementSummary のタイムスタンプ形式
+## MeasurementSummary Timestamp Format
 
-128 バイト固定長。オフセット 20 からタイムスタンプが格納されています。
+128 bytes fixed length. Timestamp is stored starting at offset 20.
 
 ```
-offset 20: 年 (uint16 LE, 例: 0x07EA = 2026)
-offset 22: 月 (uint8)
-offset 23: 日 (uint8)
-offset 24: 時 (uint8)
-offset 25: 分 (uint8)
-offset 26: 秒 (uint8)
-offset 27: タイムゾーン (uint8, 15分単位, JST=36 → 36×15=540分=UTC+9)
+offset 20: year  (uint16 LE, e.g. 0x07EA = 2026)
+offset 22: month (uint8)
+offset 23: day   (uint8)
+offset 24: hour  (uint8)
+offset 25: minute (uint8)
+offset 26: second (uint8)
+offset 27: timezone (uint8, in 15-minute units; JST = 36 → 36×15 = 540 min = UTC+9)
 ```
 
-UTC への変換: `UTC = ローカル時刻 - タイムゾーンオフセット`
+Converting to UTC: `UTC = local_time − timezone_offset`
 
 ---
 
-## CONTROL_POINT (b5a60030-...) の制御値
+## CONTROL_POINT (b5a60030-...) values
 
-| 名前 | 値 | 用途 |
+| Name | Value | Purpose |
 |---|---|---|
-| SET_HIGH_SPEED | 0x08 | 高速転送モード有効化 |
-| LOCK_MUTEX | 0x10 | デバイスの排他ロック取得 |
-| UNLOCK_MUTEX | 0x20 | 排他ロック解放（切断前に送る） |
-| FORCE_DISCONNECT | 0x80 | 強制切断 |
+| SET_HIGH_SPEED | 0x08 | Enable high-speed transfer mode |
+| LOCK_MUTEX | 0x10 | Acquire exclusive device lock |
+| UNLOCK_MUTEX | 0x20 | Release exclusive lock (send before disconnecting) |
+| FORCE_DISCONNECT | 0x80 | Force disconnect |
 
-切断前に `UNLOCK_MUTEX (0x20)` を送ることを推奨します。送らなくてもデバイスは機能しますが、次回接続時に問題が生じる可能性があります。
-
----
-
-## BleManager のサービスレベル状態遷移
-
-APK の `BleManager.java` に実装されている接続後の初期化シーケンス（serviceLevel）。
-
-```
-0 → 接続完了
-1 → DATA_EVENT (b5a60031) の notify 購読完了
-2 → 心拍リアルタイム通知設定（標準 HRS: 0x180D）
-3 → 高速転送モード設定（CONTROL_POINT に SET_HIGH_SPEED 送信）
-7 → 初期化完了
-```
-
-データ取得のみ行う場合は、状態遷移を厳密に再現しなくても動作します（ConnectCommand → IndexTable → GetBody の順序さえ守れば十分）。
+It is recommended to write `UNLOCK_MUTEX (0x20)` before disconnecting. Omitting it does not immediately break things, but may cause issues on the next connection attempt.
 
 ---
 
-## Python 実装
+## BleManager Service-Level State Machine
 
-`python/` ディレクトリに macOS 向けの実装があります。
+The post-connect initialization sequence (`serviceLevel`) implemented in `BleManager.java` in the APK.
+
+```
+0 → connection established
+1 → DATA_EVENT (b5a60031) notify subscription complete
+2 → real-time HR notification configured (standard HRS: 0x180D)
+3 → high-speed transfer mode set (write SET_HIGH_SPEED to CONTROL_POINT)
+7 → initialization complete
+```
+
+For data export purposes, reproducing the full state machine is not required. Following the order **ConnectCommand → IndexTable → GetBody** is sufficient.
+
+---
+
+## Python Implementation
+
+A macOS implementation is available in the `python/` directory.
 
 ```
 python/
-├── 09_get_history.py     # メイン: 全レコードを CSV に保存（チェックポイント再開対応）
-└── 10_fix_timestamps.py  # オフライン処理: CSV にタイムスタンプを付与
+├── 09_get_history.py     # Main: downloads all records to CSV (supports checkpoint resume)
+└── 10_fix_timestamps.py  # Offline: adds timestamps to the CSV output
 ```
 
-### 実行方法
+### Running
 
 ```bash
 cd python
@@ -339,29 +341,29 @@ pip install bleak
 python 09_get_history.py <BLE_ADDRESS>
 ```
 
-macOS の BLE アドレスは UUID 形式（例: `276C6E62-0794-F8E4-DF48-33B52C0460C5`）。
+On macOS, BLE addresses are UUIDs (e.g. `276C6E62-0794-F8E4-DF48-33B52C0460C5`).
 
-### 出力ファイル
+### Output files
 
-| ファイル | 内容 |
+| File | Contents |
 |---|---|
-| `heart_rate_history.csv` | 取得した生データ（summary_hex 含む） |
-| `history_checkpoint.json` | 進捗（中断後の再開に使用） |
-| `history_indices.json` | インデックスキャッシュ（再接続時の高速化） |
+| `heart_rate_history.csv` | Raw downloaded data (includes summary_hex) |
+| `history_checkpoint.json` | Progress file for resuming after interruption |
+| `history_indices.json` | Index cache for faster reconnection |
 
 ---
 
-## 解析に使用したツール・ファイル
+## Tools and Source Files Used for Analysis
 
-- `jadx` による APK 逆コンパイル（PULSENSE View 2.2.6）
-- 参照した主要なクラス:
-  - `WristableDataStream.java` — BLE 送受信プロトコル本体
-  - `BleManager.java` — 接続ライフサイクル・状態機械
-  - `CommandId.java` — コマンド ID 定数
-  - `DataClassElementId.java` — 要素 ID 定数
-  - `DataClassId.java` — データクラス ID 定数
-  - `IndexTableFilter.java` — フィルタ値定数
-  - `UploadFlag.java` — アップロードフラグ定数
-  - `SetDataClassUploadFlagCommand.java` — フラグ書き込みコマンド
-  - `BleFlagger.java` — アップロードフラグ一括設定ロジック
-  - `DisconnectCommand.java` / `ResetCommand.java` — 切断・リセットコマンド
+- APK decompiled with **jadx** (PULSENSE View 2.2.6)
+- Key classes referenced:
+  - `WristableDataStream.java` — core BLE send/receive protocol
+  - `BleManager.java` — connection lifecycle and state machine
+  - `CommandId.java` — command ID constants
+  - `DataClassElementId.java` — element ID constants
+  - `DataClassId.java` — data class ID constants
+  - `IndexTableFilter.java` — filter value constants
+  - `UploadFlag.java` — upload flag constants
+  - `SetDataClassUploadFlagCommand.java` — flag write command
+  - `BleFlagger.java` — bulk upload flag logic
+  - `DisconnectCommand.java` / `ResetCommand.java` — disconnect and reset commands

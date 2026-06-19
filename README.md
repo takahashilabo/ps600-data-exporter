@@ -1,63 +1,70 @@
-# PS-600 データエクスポーター
+# PS-600 Data Exporter
 
-EPSON PULSENSE PS-600 に記録された脈拍データを Bluetooth 経由で取得し、CSV ファイルとして保存するツールです。
+A browser-based tool to retrieve heart rate data recorded on your **EPSON PULSENSE PS-600** via Bluetooth and save it as a CSV file.
 
-公式アプリ「PULSENSE View」のサービス終了（2025年3月31日）に伴い、時計に残ったデータを救い出すために作成しました。
+This tool was created following the shutdown of the official PULSENSE View app (March 31, 2025), so that PS-600 owners can still access their data.
 
-## 使い方
+> 日本語はこちら → [README_ja.md](README_ja.md)
 
-### 動作環境
+---
 
-| OS | ブラウザ |
+## Supported environments
+
+| OS | Browser |
 |---|---|
 | Windows | Chrome / Edge |
 | macOS | Chrome / Edge |
 | Android | Chrome / Edge |
-| iOS（iPhone / iPad） | **非対応**（Apple の制限により Web Bluetooth が使えません） |
-
-### 手順
-
-**1. 時計を接続待ちモードにする**
-
-時計の左上ボタンを長押しするとメニューが表示されます。メニューから「Bluetooth ペアリング」を選択してください。
-
-**2. ブラウザでページを開く**
-
-以下の URL に Chrome または Edge でアクセスします。
-
-👉 **https://takahashilabo.github.io/ps600-reader/**
-
-**3. 時計に接続する**
-
-「時計に接続する」ボタンを押すと、Bluetooth デバイスの一覧が表示されます。PS-600 を選択してください。
-
-**4. データ取得を待つ**
-
-接続後、自動的にデータの取得が始まります。記録件数によって時間がかかります（目安：1,000件あたり約8分）。そのままお待ちください。
-
-**5. CSV をダウンロードする**
-
-取得完了後、測定セッションの一覧が表示されます。ダウンロードしたいセッションにチェックを入れ（初期値：すべて選択）、識別名を入力して「CSVダウンロード」を押してください。
-
-複数台の時計をお使いの場合は、識別名（例：「1号機」「田中」）を入力することでファイル名で区別できます。
-
-### CSV のフォーマット
-
-| 列名 | 内容 |
-|---|---|
-| `datetime_jst` | 測定日時（JST、例：2026-04-24 10:30:00） |
-| `unix_timestamp` | Unix タイムスタンプ（秒） |
-| `record_index` | デバイス内のレコード番号 |
-| `sample_num` | セッション内のサンプル番号（1サンプル = 約1分） |
-| `heart_rate_bpm` | 脈拍数（BPM） |
-
-### 注意事項
-
-- データ取得中はブラウザのタブを閉じないでください（中断するとやり直しになります）
-- 時計の Bluetooth ペアリング画面は一定時間で解除されることがあります。接続が切れた場合は再度ペアリングモードにして「最初からやり直す」ボタンを押してください
+| iOS (iPhone / iPad) | **Not supported** (Web Bluetooth is not available on iOS) |
 
 ---
 
-## 技術情報・プロトコル解析
+## How to use
 
-BLE プロトコルの解析内容、コマンド仕様、Python 実装については → [PROTOCOL.md](PROTOCOL.md)
+### Step 1 — Put the watch into pairing mode
+
+Long-press the **top-left button** on the watch until the menu appears. Select **"Bluetooth Pairing"** from the menu.
+
+### Step 2 — Open the page in your browser
+
+Open the following URL in Chrome or Edge:
+
+👉 **https://takahashilabo.github.io/ps600-reader/**
+
+### Step 3 — Connect to the watch
+
+Press the **"Connect to watch"** button. A Bluetooth device picker will appear. Select your PS-600 from the list.
+
+### Step 4 — Wait for data transfer
+
+Data transfer starts automatically after connecting. The time required depends on the number of records stored on the watch (roughly **8 minutes per 1,000 records**). Keep the browser tab open and wait.
+
+### Step 5 — Download CSV
+
+Once the transfer is complete, a list of measurement sessions is displayed. Check the sessions you want to download (all sessions are pre-selected), enter a label for the watch if you have multiple devices, then press **"Download CSV"**.
+
+---
+
+## CSV format
+
+| Column | Description |
+|---|---|
+| `datetime_jst` | Measurement timestamp (JST, e.g. `2026-04-24 10:30:00`) |
+| `unix_timestamp` | Unix timestamp (seconds) |
+| `record_index` | Record index on the device |
+| `sample_num` | Sample number within the session (1 sample ≈ 1 minute) |
+| `heart_rate_bpm` | Heart rate (BPM) |
+
+---
+
+## Notes
+
+- Do not close the browser tab while data is being transferred. If the connection is lost, you will need to start over.
+- The watch's Bluetooth pairing screen may time out. If the connection drops, re-enter pairing mode and press **"Start over"** in the browser.
+- When using multiple watches, enter a label (e.g. "Unit-1", "John") to distinguish files by name.
+
+---
+
+## Technical details / Protocol reference
+
+For BLE protocol analysis, command specifications, and the Python implementation, see → [PROTOCOL.md](PROTOCOL.md)
