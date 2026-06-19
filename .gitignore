@@ -7,8 +7,15 @@
 __pycache__/
 *.pyc
 
-# APK解析ソース
+# 探索・デバッグ用スクリプト（公開不要）
+0[0-8]_*.py
+
+# APK・解析ソース
+*.apk
 pulsense_src/
+
+# 作業メモ
+HANDOFF.md
 
 # macOS
 .DS_Store
