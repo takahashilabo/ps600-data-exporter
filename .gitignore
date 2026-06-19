@@ -1,0 +1,14 @@
+# 個人データ
+*.csv
+*.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# APK解析ソース
+pulsense_src/
+
+# macOS
+.DS_Store

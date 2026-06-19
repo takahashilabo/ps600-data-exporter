@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PS-600 データエクスポーター</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f0f4f8;
+  color: #1a202c;
+  min-height: 100vh;
+}
+
+.screen { display: none; }
+.screen.active { display: block; }
+
+/* ---- layout ---- */
+.card {
+  max-width: 640px;
+  margin: 48px auto;
+  background: #fff;
+  border-radius: 16px;
+  padding: 40px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.08);
+}
+
+h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
+h2 { font-size: 1.2rem; font-weight: 600; margin-bottom: 16px; color: #2d3748; }
+
+.subtitle {
+  color: #718096;
+  font-size: .9rem;
+  margin-bottom: 32px;
+  line-height: 1.6;
+}
+
+.badge {
+  display: inline-block;
+  background: #ebf8ff;
+  color: #2b6cb0;
+  font-size: .75rem;
+  padding: 3px 10px;
+  border-radius: 99px;
+  margin-bottom: 24px;
+}
+
+/* ---- button ---- */
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 500;
+  transition: opacity .15s;
+}
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn:not(:disabled):hover { opacity: .85; }
+
+.btn-primary {
+  background: #3182ce;
+  color: #fff;
+  padding: 14px 32px;
+  font-size: 1rem;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  transition: opacity .15s, transform .1s;
+}
+.btn-primary:not(:disabled):hover { opacity: .9; transform: translateY(-1px); }
+.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+
+.btn-secondary {
+  background: #edf2f7;
+  color: #4a5568;
+}
+
+/* ---- error / info box ---- */
+.error-box {
+  background: #fff5f5;
+  border: 1px solid #feb2b2;
+  border-radius: 8px;
+  padding: 14px 16px;
+  color: #c53030;
+  font-size: .875rem;
+  line-height: 1.5;
+  margin-top: 16px;
+}
+
+.info-box {
+  background: #ebf8ff;
+  border: 1px solid #90cdf4;
+  border-radius: 8px;
+  padding: 14px 16px;
+  color: #2c5282;
+  font-size: .875rem;
+  line-height: 1.5;
+  margin-top: 16px;
+}
+
+/* ---- progress ---- */
+.progress-wrap {
+  background: #e2e8f0;
+  border-radius: 99px;
+  height: 10px;
+  overflow: hidden;
+  margin: 20px 0 12px;
+}
+.progress-bar {
+  height: 100%;
+  background: #3182ce;
+  border-radius: 99px;
+  transition: width .3s ease;
+  width: 0%;
+}
+
+.progress-text {
+  font-size: 1rem;
+  color: #2d3748;
+  font-weight: 500;
+}
+
+.progress-detail {
+  font-size: .8rem;
+  color: #718096;
+  margin-top: 6px;
+  min-height: 1.2em;
+}
+
+/* ---- period list ---- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.toolbar-summary {
+  margin-left: auto;
+  font-size: .85rem;
+  color: #718096;
+}
+
+.period-list {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 24px;
+}
+
+.period-item {
+  display: flex;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #f0f4f8;
+  cursor: pointer;
+  transition: background .1s;
+  gap: 14px;
+}
+.period-item:last-child { border-bottom: none; }
+.period-item:hover { background: #f7fafc; }
+.period-item.checked { background: #ebf8ff; }
+
+.period-item input[type=checkbox] {
+  width: 18px; height: 18px;
+  accent-color: #3182ce;
+  flex-shrink: 0;
+}
+
+.period-info { flex: 1; min-width: 0; }
+.period-date { font-weight: 600; font-size: .95rem; }
+.period-stats { font-size: .8rem; color: #718096; margin-top: 2px; }
+
+.period-count {
+  font-size: .8rem;
+  color: #4a5568;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.export-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  align-items: center;
+}
+
+.export-info {
+  font-size: .85rem;
+  color: #718096;
+}
+
+/* ---- screen: connect ---- */
+#screen-connect .btn-primary { display: block; width: 100%; margin-top: 24px; }
+
+/* ---- screen: done ---- */
+.done-icon {
+  font-size: 3rem;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 680px) {
+  .card { margin: 0; border-radius: 0; min-height: 100vh; padding: 28px 20px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===================== screen: unsupported ===================== -->
+<div id="screen-unsupported" class="screen">
+  <div class="card">
+    <h1>PS-600 データエクスポーター</h1>
+    <div class="error-box" style="margin-top:24px">
+      このブラウザは <strong>Web Bluetooth API</strong> に対応していません。<br><br>
+      <strong>Chrome または Edge（Windows / macOS）</strong> でお試しください。<br>
+      ※ iOS（iPhone / iPad）はすべてのブラウザで非対応です。
+    </div>
+  </div>
+</div>
+
+<!-- ===================== screen: connect ===================== -->
+<div id="screen-connect" class="screen">
+  <div class="card">
+    <h1>PS-600 データエクスポーター</h1>
+    <p class="subtitle">
+      EPSON PULSENSE PS-600 に記録された脈拍データを<br>
+      Bluetooth 経由で取得し、CSV ファイルとして保存します。<br>
+      時計の電源を入れ、PC に近づけてからボタンを押してください。
+    </p>
+    <div class="badge">Chrome / Edge のみ対応 ・ iOS 非対応</div>
+    <button id="btn-connect" class="btn-primary">時計に接続する</button>
+    <div id="connect-error" class="error-box" hidden></div>
+  </div>
+</div>
+
+<!-- ===================== screen: progress ===================== -->
+<div id="screen-progress" class="screen">
+  <div class="card">
+    <h1>データ取得中</h1>
+    <p class="subtitle">接続を維持したまましばらくお待ちください。</p>
+    <div class="progress-wrap"><div id="progress-bar" class="progress-bar"></div></div>
+    <p id="progress-text" class="progress-text">準備中...</p>
+    <p id="progress-detail" class="progress-detail"></p>
+  </div>
+</div>
+
+<!-- ===================== screen: select ===================== -->
+<div id="screen-select" class="screen">
+  <div class="card">
+    <h1>ダウンロードするデータを選択</h1>
+    <p class="subtitle" id="select-subtitle"></p>
+
+    <div class="toolbar">
+      <button id="btn-select-all" class="btn btn-secondary">すべて選択</button>
+      <button id="btn-deselect-all" class="btn btn-secondary">すべて解除</button>
+      <span id="toolbar-summary" class="toolbar-summary"></span>
+    </div>
+
+    <div id="period-list" class="period-list"></div>
+
+    <div class="export-bar">
+      <span id="export-info" class="export-info"></span>
+      <button id="btn-export" class="btn-primary">CSVダウンロード</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== screen: done ===================== -->
+<div id="screen-done" class="screen">
+  <div class="card">
+    <div class="done-icon">✓</div>
+    <h1 style="text-align:center">ダウンロード完了</h1>
+    <p class="subtitle" id="done-subtitle" style="text-align:center;margin-top:12px"></p>
+    <button id="btn-restart" class="btn-primary" style="display:block;width:100%;margin-top:24px">
+      最初からやり直す
+    </button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ================================================================
+// 定数
+// ================================================================
+const SERVICE_UUID       = 'b5a60000-2ed3-e993-896b-cceb986f8d73';
+const UUID_DL_SIZE       = 'b5a60020-2ed3-e993-896b-cceb986f8d73';
+const UUID_DL_DATA       = 'b5a60022-2ed3-e993-896b-cceb986f8d73';
+const UUID_DL_ORDER      = 'b5a60021-2ed3-e993-896b-cceb986f8d73';
+const UUID_UL_DATA       = 'b5a60012-2ed3-e993-896b-cceb986f8d73';
+const UUID_UL_ORDER      = 'b5a60011-2ed3-e993-896b-cceb986f8d73';
+const UUID_UL_SIZE       = 'b5a60010-2ed3-e993-896b-cceb986f8d73';
+const UUID_DATA_EVENT    = 'b5a60031-2ed3-e993-896b-cceb986f8d73';
+const UUID_CONTROL_POINT = 'b5a60030-2ed3-e993-896b-cceb986f8d73';
+
+const CMD_CONNECT    = 0x00;
+const CMD_GET_DATA   = 0x20;
+const ELEM_BODY      = 0x00;
+const ELEM_IDX_TABLE = 0x02;
+const ELEM_BODY_SIZE = 0x41;
+const FILTER_NONE    = 0x00;
+const CLASS_LOG      = 0x5100;
+const CLASS_SUMMARY  = 0x5110;
+const IS_FIRST  = 0x80;
+const IS_LAST   = 0x40;
+const ACK_OK    = 0xAA;
+const BLOCK_SIZE = 32;
+const CP_UNLOCK_MUTEX = 0x20;
+
+// ================================================================
+// ユーティリティ
+// ================================================================
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+function concat(...arrays) {
+  const total = arrays.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const a of arrays) { out.set(a, off); off += a.length; }
+  return out;
+}
+
+function writeLE32(val) {
+  const b = new Uint8Array(4);
+  new DataView(b.buffer).setUint32(0, val, true);
+  return b;
+}
+
+function writeLE16(val) {
+  const b = new Uint8Array(2);
+  new DataView(b.buffer).setUint16(0, val, true);
+  return b;
+}
+
+// ================================================================
+// AsyncQueue - BLE通知をキューに変換
+// ================================================================
+class AsyncQueue {
+  constructor() { this._q = []; this._w = []; }
+
+  put(item) {
+    if (this._w.length) this._w.shift()(item);
+    else this._q.push(item);
+  }
+
+  get(timeoutMs = 30000) {
+    return new Promise((resolve, reject) => {
+      if (this._q.length) { resolve(this._q.shift()); return; }
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        const i = this._w.findIndex(w => w === waiter);
+        if (i >= 0) this._w.splice(i, 1);
+        reject(new Error('timeout'));
+      }, timeoutMs);
+      const waiter = item => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(item);
+      };
+      this._w.push(waiter);
+    });
+  }
+
+  clear() { this._q = []; }
+}
+
+// ================================================================
+// AsyncEvent - DL_ACKイベント
+// ================================================================
+class AsyncEvent {
+  constructor() { this._set = false; this._val = null; this._w = []; }
+
+  set(val) {
+    this._set = true; this._val = val;
+    this._w.forEach(fn => fn(val));
+    this._w = [];
+  }
+
+  clear() { this._set = false; this._val = null; }
+
+  wait(timeoutMs = 30000) {
+    if (this._set) return Promise.resolve(this._val);
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        reject(new Error('DL_ACK timeout'));
+      }, timeoutMs);
+      this._w.push(val => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(val);
+      });
+    });
+  }
+}
+
+// ================================================================
+// コマンドビルダー
+// ================================================================
+function cmdConnect() {
+  // CMD_CONNECT(1B) + payload_size=0(4B LE) = 5bytes
+  return concat(new Uint8Array([CMD_CONNECT]), writeLE32(0));
+}
+
+function cmdGetIndexTable(classId, filterVal = FILTER_NONE) {
+  const payload = concat(writeLE16(classId), new Uint8Array([ELEM_IDX_TABLE, filterVal]));
+  return concat(new Uint8Array([CMD_GET_DATA]), writeLE32(payload.length), payload);
+}
+
+function cmdGetSize(classId, index) {
+  const payload = concat(writeLE16(classId), new Uint8Array([ELEM_BODY_SIZE]), writeLE16(index));
+  return concat(new Uint8Array([CMD_GET_DATA]), writeLE32(payload.length), payload);
+}
+
+function cmdGetBody(classId, index, offset, size) {
+  const payload = concat(
+    writeLE16(classId),
+    new Uint8Array([ELEM_BODY]),
+    writeLE16(index),
+    writeLE32(offset),
+    writeLE32(size)
+  );
+  return concat(new Uint8Array([CMD_GET_DATA]), writeLE32(payload.length), payload);
+}
+
+// ================================================================
+// パケット分割
+// ================================================================
+function makePacket(seq, payload, isFirst, isLast) {
+  const len = payload.length;
+  const b0 = (isFirst ? IS_FIRST : 0) | (isLast ? IS_LAST : 0)
+           | ((seq & 0x1F) << 1) | ((len >> 8) & 0x01);
+  const pkt = new Uint8Array(20).fill(0xAA);
+  pkt[0] = b0;
+  pkt[1] = len & 0xFF;
+  pkt.set(payload, 2);
+  return pkt;
+}
+
+function divideCommand(data) {
+  const pkts = [];
+  let seq = 0, off = 0;
+  while (off < data.length) {
+    const end = Math.min(off + 18, data.length);
+    pkts.push(makePacket(seq % BLOCK_SIZE, data.slice(off, end), off === 0, end >= data.length));
+    seq++; off = end;
+  }
+  return pkts;
+}
+
+// ================================================================
+// レスポンスパーサー
+// ================================================================
+function parseIndexTable(data) {
+  if (data.length < 14) return null;
+  const v = new DataView(data.buffer, data.byteOffset);
+  if (v.getUint8(5) !== 0) return null;
+  const tableSize = v.getUint32(10, true);
+  const indices = [];
+  for (let i = 14; i + 1 < data.length && i < 14 + tableSize; i += 2)
+    indices.push(v.getUint16(i, true));
+  return indices;
+}
+
+function parseDataSize(data) {
+  if (data.length < 15) return null;
+  if (data[5] !== 0) return null;
+  return new DataView(data.buffer, data.byteOffset).getUint32(11, true);
+}
+
+function parseBody(data) {
+  if (data.length < 19) return null;
+  if (data[5] !== 0) return null;
+  return data.slice(19);
+}
+
+function parseSummaryTimestamp(bodyPayload) {
+  // Summary body: timestamp at offset 20
+  const off = 20;
+  if (bodyPayload.length < off + 8) return null;
+  const v = new DataView(bodyPayload.buffer, bodyPayload.byteOffset);
+  const year   = v.getUint16(off, true);
+  const month  = bodyPayload[off + 2];
+  const day    = bodyPayload[off + 3];
+  const hour   = bodyPayload[off + 4];
+  const minute = bodyPayload[off + 5];
+  const second = bodyPayload[off + 6];
+  const tzQ    = bodyPayload[off + 7];  // 15分単位 (JST=36)
+  // ローカル時刻 → UTC に変換
+  const localMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  const offsetMs = tzQ * 15 * 60 * 1000;
+  return new Date(localMs - offsetMs);  // UTC
+}
+
+// ================================================================
+// PS600Protocol - BLEコマンド送受信
+// ================================================================
+class PS600Protocol {
+  constructor(chars) {
+    this._chars = chars;
+    this._dlAck = new AsyncEvent();
+    this._ulQueue = new AsyncQueue();
+    this._connected = true;
+
+    chars.dlOrder.addEventListener('characteristicvaluechanged', e => {
+      const val = new Uint8Array(e.target.value.buffer)[0];
+      this._dlAck.set(val);
+    });
+
+    chars.ulData.addEventListener('characteristicvaluechanged', e => {
+      const data = new Uint8Array(e.target.value.buffer);
+      if (data.length >= 2) this._ulQueue.put(data);
+    });
+  }
+
+  async _ulAck() {
+    await this._chars.ulOrder.writeValue(new Uint8Array([ACK_OK]));
+  }
+
+  async _receiveResponse(deadlineMs) {
+    const result = [];
+
+    while (true) {
+      const remaining = deadlineMs - Date.now();
+      let pkt;
+      try {
+        pkt = await this._ulQueue.get(Math.max(remaining, 1000));
+      } catch {
+        throw new Error('レスポンス受信タイムアウト');
+      }
+
+      const seq    = (pkt[0] & 0x3E) >> 1;
+      const isLast = !!(pkt[0] & IS_LAST);
+      const length = ((pkt[0] & 0x01) << 8) | pkt[1];
+      result.push(...pkt.slice(2, 2 + length));
+
+      // seq==31 かつ IS_LAST の場合はブロックACKをスキップ
+      // (両方送るとデバイスが1回目のACKで切断する)
+      if (seq === 31 && !isLast) {
+        await this._ulAck();
+      }
+
+      if (isLast) {
+        await this._ulAck();
+        await delay(100);
+        return new Uint8Array(result);
+      }
+    }
+  }
+
+  async send(command, timeoutMs = 30000) {
+    const packets = divideCommand(command);
+    this._ulQueue.clear();
+    this._dlAck.clear();
+
+    // コマンドサイズ送信
+    await this._chars.dlSize.writeValue(writeLE32(command.length));
+
+    // パケット送信 (32パケットごとにACKを待つ)
+    const deadlineMs = Date.now() + timeoutMs;
+    for (let b = 0; b < packets.length; b += BLOCK_SIZE) {
+      const block = packets.slice(b, b + BLOCK_SIZE);
+      this._dlAck.clear();
+
+      for (const pkt of block) {
+        await this._chars.dlData.writeValueWithoutResponse(pkt);
+        await delay(10);
+      }
+
+      const remaining = deadlineMs - Date.now();
+      let ack;
+      try {
+        ack = await this._dlAck.wait(Math.max(remaining, 1000));
+      } catch {
+        throw new Error('送信ACKタイムアウト');
+      }
+      if (ack !== ACK_OK && ack < 32) {
+        console.warn(`再送要求 seq=${ack}`);
+      }
+    }
+
+    return this._receiveResponse(deadlineMs);
+  }
+}
+
+// ================================================================
+// 全データダウンロード
+// ================================================================
+async function downloadAllData(proto, onProgress) {
+  // ConnectCommand
+  onProgress({ phase: 'connect' });
+  await proto.send(cmdConnect());
+
+  // IndexTable
+  onProgress({ phase: 'index' });
+  const logResp = await proto.send(cmdGetIndexTable(CLASS_LOG));
+  const logIndices = parseIndexTable(logResp) || [];
+
+  const sumResp = await proto.send(cmdGetIndexTable(CLASS_SUMMARY));
+  const sumIndices = new Set(parseIndexTable(sumResp) || []);
+
+  const total = logIndices.length;
+  onProgress({ phase: 'downloading', done: 0, total });
+
+  const records = [];
+
+  for (let i = 0; i < logIndices.length; i++) {
+    const idx = logIndices[i];
+    onProgress({ phase: 'downloading', done: i, total, index: idx });
+
+    // GetSize (log)
+    const sizeResp = await proto.send(cmdGetSize(CLASS_LOG, idx));
+    const dataSize = parseDataSize(sizeResp);
+    if (!dataSize) continue;
+
+    // GetBody (log)
+    const bodyResp = await proto.send(cmdGetBody(CLASS_LOG, idx, 0, dataSize));
+    const payload = parseBody(bodyResp);
+    if (!payload) continue;
+
+    // GetSummary (タイムスタンプ)
+    let startDate = null;
+    if (sumIndices.has(idx)) {
+      try {
+        const sResp = await proto.send(cmdGetSize(CLASS_SUMMARY, idx));
+        const sSize = parseDataSize(sResp);
+        if (sSize) {
+          const sBody = await proto.send(cmdGetBody(CLASS_SUMMARY, idx, 0, sSize));
+          const sPay = parseBody(sBody);
+          if (sPay) startDate = parseSummaryTimestamp(sPay);
+        }
+      } catch { /* タイムスタンプ取得失敗は無視 */ }
+    }
+
+    // サンプル解析
+    const samples = [];
+    const numSamples = Math.floor(payload.length / 4);
+    for (let s = 0; s < numSamples; s++) {
+      const hr = payload[s * 4];
+      if (hr === 0 || hr === 0xFF) continue;
+      samples.push({ sampleNum: s, hr, flags1: payload[s * 4 + 1], flags3: payload[s * 4 + 3] });
+    }
+
+    if (samples.length > 0) {
+      records.push({ index: idx, startDate, samples });
+    }
+  }
+
+  onProgress({ phase: 'done', total: records.length });
+  return records;
+}
+
+// ================================================================
+// 期間グループ化（日付ベース）
+// ================================================================
+function groupByDate(records) {
+  // 日付ごとにレコードをまとめて表示するが、
+  // チェックボックスはレコード単位（=測定セッション単位）
+  const groups = new Map();  // dateStr → [{record, dateStr, timeStr}]
+
+  for (const rec of records) {
+    let dateStr = '日時不明';
+    let timeStr = '';
+
+    if (rec.startDate) {
+      dateStr = rec.startDate.toLocaleDateString('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric', month: '2-digit', day: '2-digit'
+      });
+      timeStr = rec.startDate.toLocaleTimeString('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        hour: '2-digit', minute: '2-digit'
+      });
+    }
+
+    if (!groups.has(dateStr)) groups.set(dateStr, []);
+    groups.get(dateStr).push({ rec, timeStr });
+  }
+
+  return groups;
+}
+
+// ================================================================
+// CSV生成
+// ================================================================
+function generateCSV(records) {
+  const rows = [['datetime_jst', 'unix_timestamp', 'record_index', 'sample_num', 'heart_rate_bpm']];
+
+  for (const rec of records) {
+    for (const s of rec.samples) {
+      let dtStr = '', ts = '';
+      if (rec.startDate) {
+        const sDate = new Date(rec.startDate.getTime() + s.sampleNum * 60 * 1000);
+        dtStr = sDate.toLocaleString('ja-JP', {
+          timeZone: 'Asia/Tokyo',
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+          hour12: false
+        }).replace(/\//g, '-').replace(',', '');
+        ts = Math.floor(sDate.getTime() / 1000);
+      }
+      rows.push([dtStr, ts, rec.index, s.sampleNum, s.hr]);
+    }
+  }
+
+  return '﻿' + rows.map(r => r.join(',')).join('\r\n');  // BOM付き (Excel対応)
+}
+
+function downloadFile(content, filename) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ================================================================
+// UI制御
+// ================================================================
+let allRecords = [];
+let checkStates = new Map();  // index → boolean
+
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function updateProgress(info) {
+  const bar  = document.getElementById('progress-bar');
+  const text = document.getElementById('progress-text');
+  const det  = document.getElementById('progress-detail');
+
+  if (info.phase === 'connect') {
+    text.textContent = '接続中...';
+    det.textContent = '';
+    bar.style.width = '5%';
+  } else if (info.phase === 'index') {
+    text.textContent = 'レコード一覧を取得中...';
+    det.textContent = '';
+    bar.style.width = '10%';
+  } else if (info.phase === 'downloading') {
+    const pct = info.total > 0 ? Math.round((info.done / info.total) * 85 + 10) : 10;
+    bar.style.width = pct + '%';
+    text.textContent = `${info.done} / ${info.total} 件取得中`;
+    if (info.index !== undefined)
+      det.textContent = `レコード index=${info.index}`;
+  } else if (info.phase === 'done') {
+    bar.style.width = '100%';
+    text.textContent = `取得完了: ${info.total} セッション`;
+    det.textContent = '';
+  }
+}
+
+function buildPeriodList(records) {
+  const list = document.getElementById('period-list');
+  list.innerHTML = '';
+  checkStates.clear();
+
+  const groups = groupByDate(records);
+  let itemIdx = 0;
+
+  for (const [dateStr, items] of [...groups.entries()].sort(([a],[b]) => a < b ? -1 : 1)) {
+    for (const { rec, timeStr } of items) {
+      checkStates.set(rec.index, true);
+      const hrs = rec.samples.map(s => s.hr);
+      const avg = Math.round(hrs.reduce((a, b) => a + b, 0) / hrs.length);
+      const min = Math.min(...hrs);
+      const max = Math.max(...hrs);
+
+      const label = timeStr ? `${dateStr} ${timeStr}〜` : dateStr;
+      const durationMin = rec.samples.length > 0
+        ? `約 ${rec.samples[rec.samples.length - 1].sampleNum + 1} 分`
+        : '';
+
+      const div = document.createElement('div');
+      div.className = 'period-item checked';
+      div.dataset.index = rec.index;
+      div.innerHTML = `
+        <input type="checkbox" checked data-idx="${rec.index}">
+        <div class="period-info">
+          <div class="period-date">${label}</div>
+          <div class="period-stats">平均 ${avg} / 最低 ${min} / 最高 ${max} BPM ・ ${durationMin}</div>
+        </div>
+        <div class="period-count">${hrs.length} 件</div>
+      `;
+
+      const cb = div.querySelector('input');
+      div.addEventListener('click', e => {
+        if (e.target !== cb) cb.checked = !cb.checked;
+        checkStates.set(rec.index, cb.checked);
+        div.classList.toggle('checked', cb.checked);
+        updateToolbarSummary();
+      });
+
+      list.appendChild(div);
+      itemIdx++;
+    }
+  }
+
+  updateToolbarSummary();
+}
+
+function updateToolbarSummary() {
+  const checked = [...checkStates.values()].filter(Boolean).length;
+  const total = checkStates.size;
+  document.getElementById('toolbar-summary').textContent = `${checked} / ${total} セッション選択中`;
+  updateExportInfo();
+}
+
+function updateExportInfo() {
+  const selectedRecords = allRecords.filter(r => checkStates.get(r.index));
+  const totalSamples = selectedRecords.reduce((s, r) => s + r.samples.length, 0);
+  document.getElementById('export-info').textContent = `合計 ${totalSamples.toLocaleString()} 件`;
+}
+
+// ================================================================
+// メイン: 接続 → ダウンロード
+// ================================================================
+document.getElementById('btn-connect').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-connect');
+  const errBox = document.getElementById('connect-error');
+  errBox.hidden = true;
+  btn.disabled = true;
+  btn.textContent = '接続中...';
+
+  let device, server;
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }]
+    });
+  } catch (e) {
+    if (e.name === 'NotFoundError') {
+      // ユーザーがキャンセル
+      btn.disabled = false;
+      btn.textContent = '時計に接続する';
+      return;
+    }
+    // サービスフィルタが効かない場合は名前フィルタにフォールバック
+    try {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'PS-600' }, { namePrefix: 'PULSENSE' }],
+        optionalServices: [SERVICE_UUID]
+      });
+    } catch (e2) {
+      errBox.textContent = `接続できませんでした: ${e2.message}`;
+      errBox.hidden = false;
+      btn.disabled = false;
+      btn.textContent = '時計に接続する';
+      return;
+    }
+  }
+
+  showScreen('screen-progress');
+
+  let chars;
+  try {
+    server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+
+    chars = {
+      dlSize:  await service.getCharacteristic(UUID_DL_SIZE),
+      dlData:  await service.getCharacteristic(UUID_DL_DATA),
+      dlOrder: await service.getCharacteristic(UUID_DL_ORDER),
+      ulData:  await service.getCharacteristic(UUID_UL_DATA),
+      ulOrder: await service.getCharacteristic(UUID_UL_ORDER),
+      ulSize:  await service.getCharacteristic(UUID_UL_SIZE),
+      ctrlPt:  await service.getCharacteristic(UUID_CONTROL_POINT),
+      dataEvt: await service.getCharacteristic(UUID_DATA_EVENT),
+    };
+
+    await chars.dlOrder.startNotifications();
+    await chars.ulData.startNotifications();
+    await chars.ulSize.startNotifications();
+    await chars.dataEvt.startNotifications();
+
+    const proto = new PS600Protocol(chars);
+
+    allRecords = await downloadAllData(proto, updateProgress);
+
+    // 正常終了: UNLOCK_MUTEX
+    try { await chars.ctrlPt.writeValue(new Uint8Array([CP_UNLOCK_MUTEX])); } catch {}
+
+  } catch (e) {
+    console.error(e);
+    // UNLOCK_MUTEX 試みる
+    if (chars?.ctrlPt) {
+      try { await chars.ctrlPt.writeValue(new Uint8Array([CP_UNLOCK_MUTEX])); } catch {}
+    }
+
+    // エラー表示 → 接続画面に戻る
+    showScreen('screen-connect');
+    errBox.textContent = `エラー: ${e.message}`;
+    errBox.hidden = false;
+    btn.disabled = false;
+    btn.textContent = '時計に接続する';
+    if (server?.connected) server.disconnect();
+    return;
+  }
+
+  // 切断
+  try { if (server?.connected) server.disconnect(); } catch {}
+
+  if (allRecords.length === 0) {
+    showScreen('screen-connect');
+    errBox.textContent = 'データが取得できませんでした。時計を近づけて再試行してください。';
+    errBox.hidden = false;
+    btn.disabled = false;
+    btn.textContent = '時計に接続する';
+    return;
+  }
+
+  // 選択画面へ
+  const totalSamples = allRecords.reduce((s, r) => s + r.samples.length, 0);
+  document.getElementById('select-subtitle').textContent =
+    `${allRecords.length} セッション / ${totalSamples.toLocaleString()} サンプルを取得しました。`;
+  buildPeriodList(allRecords);
+  showScreen('screen-select');
+});
+
+// すべて選択 / 解除
+document.getElementById('btn-select-all').addEventListener('click', () => {
+  document.querySelectorAll('#period-list input[type=checkbox]').forEach(cb => {
+    cb.checked = true;
+    checkStates.set(parseInt(cb.dataset.idx), true);
+    cb.closest('.period-item').classList.add('checked');
+  });
+  updateToolbarSummary();
+});
+
+document.getElementById('btn-deselect-all').addEventListener('click', () => {
+  document.querySelectorAll('#period-list input[type=checkbox]').forEach(cb => {
+    cb.checked = false;
+    checkStates.set(parseInt(cb.dataset.idx), false);
+    cb.closest('.period-item').classList.remove('checked');
+  });
+  updateToolbarSummary();
+});
+
+// CSVダウンロード
+document.getElementById('btn-export').addEventListener('click', () => {
+  const selected = allRecords.filter(r => checkStates.get(r.index));
+  if (selected.length === 0) {
+    alert('エクスポートするセッションを選択してください。');
+    return;
+  }
+
+  const csv = generateCSV(selected);
+  const dateStr = new Date().toISOString().slice(0, 10);
+  downloadFile(csv, `ps600_heartrate_${dateStr}.csv`);
+
+  const totalSamples = selected.reduce((s, r) => s + r.samples.length, 0);
+  document.getElementById('done-subtitle').textContent =
+    `${selected.length} セッション・${totalSamples.toLocaleString()} サンプルを保存しました。`;
+  showScreen('screen-done');
+});
+
+// 最初からやり直す
+document.getElementById('btn-restart').addEventListener('click', () => {
+  allRecords = [];
+  checkStates.clear();
+  const btn = document.getElementById('btn-connect');
+  btn.disabled = false;
+  btn.textContent = '時計に接続する';
+  document.getElementById('connect-error').hidden = true;
+  showScreen('screen-connect');
+});
+
+// ================================================================
+// 起動時: Web Bluetooth サポートチェック
+// ================================================================
+if (!navigator.bluetooth) {
+  showScreen('screen-unsupported');
+} else {
+  showScreen('screen-connect');
+}
+</script>
+</body>
+</html>
