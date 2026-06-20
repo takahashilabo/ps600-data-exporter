@@ -290,7 +290,9 @@ offset 26: second (uint8)
 offset 27: timezone (uint8, in 15-minute units; JST = 36 → 36×15 = 540 min = UTC+9)
 ```
 
-Converting to UTC: `UTC = local_time − timezone_offset`
+**The timestamp fields store UTC time.** The timezone field indicates the local timezone for display only — do **not** subtract it to derive UTC.
+
+Converting to local time: `local_time = UTC + timezone_offset`
 
 ---
 
