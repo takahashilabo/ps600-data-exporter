@@ -97,6 +97,17 @@ h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
 #screen-connect .btn-primary { display: block; width: 100%; margin-top: 24px; }
 .done-icon { font-size: 3rem; text-align: center; margin-bottom: 12px; }
 
+.chart-wrap {
+  position: relative; border: 1px solid #e2e8f0; border-radius: 10px;
+  overflow: hidden; margin-bottom: 20px; background: #f8fafc;
+}
+#hr-chart { display: block; width: 100%; cursor: crosshair; }
+.chart-tooltip {
+  position: absolute; background: rgba(26,32,44,.88); color: #fff;
+  font-size: .75rem; padding: 4px 9px; border-radius: 6px;
+  pointer-events: none; white-space: nowrap; transform: translateY(-50%);
+}
+
 @media (max-width: 680px) {
   .card { margin: 0; border-radius: 0; min-height: 100vh; padding: 28px 20px; }
 }
@@ -161,6 +172,10 @@ h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
   <div class="card">
     <h1 data-i18n="select_title"></h1>
     <p class="subtitle" id="select-subtitle"></p>
+    <div class="chart-wrap">
+      <canvas id="hr-chart"></canvas>
+      <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+    </div>
     <div class="toolbar">
       <button id="btn-select-all" class="btn btn-secondary" data-i18n="select_all"></button>
       <button id="btn-deselect-all" class="btn btn-secondary" data-i18n="deselect_all"></button>
@@ -816,6 +831,140 @@ function updateToolbarSummary() {
     : `Total ${totalSamples.toLocaleString()} samples`;
 }
 
+// ================================================================
+// HR Chart
+// ================================================================
+function drawHRChart(records) {
+  const canvas = document.getElementById('hr-chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  const containerW = canvas.parentElement.offsetWidth || 560;
+  const H = 200;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(containerW * dpr);
+  canvas.height = Math.round(H * dpr);
+  canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+  const W = containerW;
+
+  // Build per-session point arrays (sorted by time)
+  const sessions = [];
+  for (const rec of [...records].sort((a, b) =>
+      (a.startDate?.getTime() ?? 0) - (b.startDate?.getTime() ?? 0))) {
+    if (!rec.startDate || rec.samples.length === 0) continue;
+    const tz = effectiveTzOffset(rec);
+    const pts = rec.samples.map(s => {
+      const d = new Date(rec.startDate.getTime() + s.sampleNum * 60000);
+      return { t: d.getTime(), hr: s.hr, localStr: toLocalStr(d, tz) };
+    });
+    pts.sort((a, b) => a.t - b.t);
+    sessions.push(pts);
+  }
+  if (sessions.length === 0) return;
+
+  const allPts = sessions.flat().sort((a, b) => a.t - b.t);
+  const minT   = allPts[0].t;
+  const maxT   = allPts[allPts.length - 1].t;
+  const rawMin = Math.min(...allPts.map(p => p.hr));
+  const rawMax = Math.max(...allPts.map(p => p.hr));
+  const hrStep = (rawMax - rawMin) <= 50 ? 10 : 20;
+  const hrMin  = Math.floor((rawMin - 5) / hrStep) * hrStep;
+  const hrMax  = Math.ceil ((rawMax + 5) / hrStep) * hrStep;
+
+  const pad = { top: 12, right: 14, bottom: 28, left: 40 };
+  const cW  = W - pad.left - pad.right;
+  const cH  = H - pad.top  - pad.bottom;
+  const xOf = t  => pad.left + (maxT > minT ? (t  - minT) / (maxT - minT) : 0.5) * cW;
+  const yOf = hr => pad.top  + cH - (hrMax > hrMin ? (hr - hrMin) / (hrMax - hrMin) : 0.5) * cH;
+
+  // Store for tooltip
+  canvas._chart = { allPts, minT, maxT, hrMin, hrMax, pad, cW, cH };
+
+  // Background
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid + Y labels
+  ctx.font = `11px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+  for (let hr = Math.ceil(hrMin / hrStep) * hrStep; hr <= hrMax; hr += hrStep) {
+    const y = yOf(hr);
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    ctx.fillStyle = '#718096'; ctx.textAlign = 'right';
+    ctx.fillText(hr, pad.left - 5, y + 4);
+  }
+
+  // X labels (left / mid / right)
+  const tRange = maxT - minT;
+  const fmtT = t => {
+    const d = new Date(t);
+    if (tRange > 86400000 * 1.5)
+      return `${d.getMonth()+1}/${d.getDate()}`;
+    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  };
+  ctx.fillStyle = '#718096';
+  ctx.textAlign = 'left';  ctx.fillText(fmtT(minT), pad.left, H - 6);
+  ctx.textAlign = 'right'; ctx.fillText(fmtT(maxT), W - pad.right, H - 6);
+  if (tRange > 0) {
+    ctx.textAlign = 'center';
+    ctx.fillText(fmtT(minT + tRange / 2), xOf(minT + tRange / 2), H - 6);
+  }
+
+  // Lines — one path per session (gaps between sessions)
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.strokeStyle = '#3182ce'; ctx.lineWidth = 1.5;
+  for (const pts of sessions) {
+    if (pts.length === 0) continue;
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const x = xOf(p.t), y = yOf(p.hr);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // Dots for single-point sessions
+    if (pts.length <= 2) {
+      ctx.fillStyle = '#3182ce';
+      for (const p of pts) {
+        ctx.beginPath(); ctx.arc(xOf(p.t), yOf(p.hr), 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  }
+
+  // Chart border
+  ctx.strokeStyle = '#cbd5e0'; ctx.lineWidth = 1;
+  ctx.strokeRect(pad.left, pad.top, cW, cH);
+}
+
+function initChartHover() {
+  const canvas  = document.getElementById('hr-chart');
+  const tooltip = document.getElementById('chart-tooltip');
+  if (!canvas || !tooltip) return;
+
+  canvas.addEventListener('mousemove', e => {
+    const c = canvas._chart;
+    if (!c || !c.allPts.length) { tooltip.hidden = true; return; }
+    const rect = canvas.getBoundingClientRect();
+    const mx   = e.clientX - rect.left;
+    const { allPts, minT, maxT, pad, cW, cH, hrMin, hrMax } = c;
+    const tAtX = minT + ((mx - pad.left) / cW) * (maxT - minT);
+    let nearest = null, best = Infinity;
+    for (const pt of allPts) {
+      const d = Math.abs(pt.t - tAtX);
+      if (d < best) { best = d; nearest = pt; }
+    }
+    if (!nearest) { tooltip.hidden = true; return; }
+    const nx = pad.left + (maxT > minT ? (nearest.t - minT) / (maxT - minT) : 0.5) * cW;
+    const ny = pad.top  + cH - (hrMax > hrMin ? (nearest.hr - hrMin) / (hrMax - hrMin) : 0.5) * cH;
+    tooltip.hidden = false;
+    tooltip.textContent = `${nearest.localStr}  ${nearest.hr} BPM`;
+    const tipW = tooltip.offsetWidth;
+    tooltip.style.left = (nx + 10 + tipW > rect.width ? nx - tipW - 10 : nx + 10) + 'px';
+    tooltip.style.top  = ny + 'px';
+  });
+  canvas.addEventListener('mouseleave', () => { tooltip.hidden = true; });
+}
+
 function disconnectSession() {
   if (gChars?.ctrlPt) { try { gChars.ctrlPt.writeValue(new Uint8Array([CP_UNLOCK_MUTEX])); } catch {} }
   if (gServer?.connected) { try { gServer.disconnect(); } catch {} }
@@ -975,6 +1124,7 @@ document.getElementById('btn-load-bodies').addEventListener('click', async () =>
     : `Loaded ${allRecords.length} sessions / ${totalSamples.toLocaleString()} samples.`;
   buildPeriodList(allRecords);
   showScreen('screen-select');
+  requestAnimationFrame(() => drawHRChart(allRecords));
 });
 
 // ================================================================
@@ -1029,6 +1179,7 @@ document.getElementById('btn-restart').addEventListener('click', () => {
 if (!navigator.bluetooth) { showScreen('screen-unsupported'); }
 else { showScreen('screen-connect'); }
 applyLang();
+initChartHover();
 </script>
 </body>
 </html>
