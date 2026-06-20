@@ -675,20 +675,34 @@ async function downloadAllData(proto, onProgress) {
   return records;
 }
 
+// Browser's local UTC offset in minutes (e.g. JST = +540)
+const BROWSER_TZ_OFFSET_MIN = -new Date().getTimezoneOffset();
+
+function effectiveTzOffset(rec) {
+  // Use the offset stored in the watch Summary; fall back to browser's local timezone
+  return (rec.tzOffsetMin !== null && rec.tzOffsetMin !== undefined)
+    ? rec.tzOffsetMin
+    : BROWSER_TZ_OFFSET_MIN;
+}
+
+function toLocalStr(utcDate, tzOffsetMin) {
+  return new Date(utcDate.getTime() + tzOffsetMin * 60 * 1000)
+    .toISOString().replace('T', ' ').slice(0, 19);
+}
+
 // ================================================================
 // Group records by date
 // ================================================================
 function groupByDate(records) {
   const groups = new Map();
-  const locale = lang === 'ja' ? 'ja-JP' : 'en-US';
 
   for (const rec of records) {
     let dateStr = t('period_unknown');
     let timeStr = '';
 
     if (rec.startDate) {
-      const local = new Date(rec.startDate.getTime() + (rec.tzOffsetMin || 0) * 60 * 1000);
-      const iso = local.toISOString();
+      const tz = effectiveTzOffset(rec);
+      const iso = toLocalStr(rec.startDate, tz);
       dateStr = iso.slice(0, 10);
       timeStr = iso.slice(11, 16);
     }
@@ -705,13 +719,12 @@ function groupByDate(records) {
 function generateCSV(records) {
   const rows = [['datetime_local', 'utc_offset_min', 'unix_timestamp', 'record_index', 'sample_num', 'heart_rate_bpm']];
   for (const rec of records) {
-    const tzOffsetMin = rec.tzOffsetMin || 0;
+    const tzOffsetMin = effectiveTzOffset(rec);
     for (const s of rec.samples) {
       let dtStr = '', ts = '';
       if (rec.startDate) {
         const sDate = new Date(rec.startDate.getTime() + s.sampleNum * 60000);
-        const local = new Date(sDate.getTime() + tzOffsetMin * 60 * 1000);
-        dtStr = local.toISOString().replace('T', ' ').slice(0, 19);
+        dtStr = toLocalStr(sDate, tzOffsetMin);
         ts = Math.floor(sDate.getTime() / 1000);
       }
       rows.push([dtStr, tzOffsetMin, ts, rec.index, s.sampleNum, s.hr]);
