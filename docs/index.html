@@ -708,11 +708,9 @@ function generateCSV(records) {
       let dtStr = '', ts = '';
       if (rec.startDate) {
         const sDate = new Date(rec.startDate.getTime() + s.sampleNum * 60000);
-        dtStr = sDate.toLocaleString('ja-JP', {
-          timeZone: 'Asia/Tokyo',
-          year: 'numeric', month: '2-digit', day: '2-digit',
-          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-        }).replace(/\//g, '-').replace(',', '');
+        // Add JST offset (+9h) then format as ISO string — avoids locale/Intl timezone issues
+        const jst = new Date(sDate.getTime() + 9 * 60 * 60 * 1000);
+        dtStr = jst.toISOString().replace('T', ' ').slice(0, 19);
         ts = Math.floor(sDate.getTime() / 1000);
       }
       rows.push([dtStr, ts, rec.index, s.sampleNum, s.hr]);
