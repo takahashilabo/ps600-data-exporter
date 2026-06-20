@@ -545,9 +545,9 @@ function parseSummaryTimestamp(bodyPayload) {
   const month = bodyPayload[off + 2], day   = bodyPayload[off + 3];
   const hour  = bodyPayload[off + 4], min   = bodyPayload[off + 5];
   const sec   = bodyPayload[off + 6], tzQ   = bodyPayload[off + 7];
+  const tzOffsetMin = tzQ * 15;
   const localMs  = Date.UTC(year, month - 1, day, hour, min, sec);
-  const offsetMs = tzQ * 15 * 60 * 1000;
-  return new Date(localMs - offsetMs);
+  return { utc: new Date(localMs - tzOffsetMin * 60 * 1000), tzOffsetMin };
 }
 
 // ================================================================
@@ -648,13 +648,16 @@ async function downloadAllData(proto, onProgress) {
     const payload = parseBody(await proto.send(cmdGetBody(CLASS_LOG, idx, 0, dataSize)));
     if (!payload) continue;
 
-    let startDate = null;
+    let startDate = null, tzOffsetMin = null;
     if (sumIndices.has(idx)) {
       try {
         const sSize = parseDataSize(await proto.send(cmdGetSize(CLASS_SUMMARY, idx)));
         if (sSize) {
           const sPay = parseBody(await proto.send(cmdGetBody(CLASS_SUMMARY, idx, 0, sSize)));
-          if (sPay) startDate = parseSummaryTimestamp(sPay);
+          if (sPay) {
+            const ts = parseSummaryTimestamp(sPay);
+            if (ts) { startDate = ts.utc; tzOffsetMin = ts.tzOffsetMin; }
+          }
         }
       } catch {}
     }
@@ -665,7 +668,7 @@ async function downloadAllData(proto, onProgress) {
       if (hr !== 0 && hr !== 0xFF)
         samples.push({ sampleNum: s, hr, flags1: payload[s*4+1], flags3: payload[s*4+3] });
     }
-    if (samples.length > 0) records.push({ index: idx, startDate, samples });
+    if (samples.length > 0) records.push({ index: idx, startDate, tzOffsetMin, samples });
   }
 
   onProgress({ phase: 'done', total: records.length });
@@ -684,12 +687,10 @@ function groupByDate(records) {
     let timeStr = '';
 
     if (rec.startDate) {
-      dateStr = rec.startDate.toLocaleDateString(locale, {
-        timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit'
-      });
-      timeStr = rec.startDate.toLocaleTimeString(locale, {
-        timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit'
-      });
+      const local = new Date(rec.startDate.getTime() + (rec.tzOffsetMin || 0) * 60 * 1000);
+      const iso = local.toISOString();
+      dateStr = iso.slice(0, 10);
+      timeStr = iso.slice(11, 16);
     }
 
     if (!groups.has(dateStr)) groups.set(dateStr, []);
@@ -702,18 +703,18 @@ function groupByDate(records) {
 // CSV generation
 // ================================================================
 function generateCSV(records) {
-  const rows = [['datetime_jst', 'unix_timestamp', 'record_index', 'sample_num', 'heart_rate_bpm']];
+  const rows = [['datetime_local', 'utc_offset_min', 'unix_timestamp', 'record_index', 'sample_num', 'heart_rate_bpm']];
   for (const rec of records) {
+    const tzOffsetMin = rec.tzOffsetMin || 0;
     for (const s of rec.samples) {
       let dtStr = '', ts = '';
       if (rec.startDate) {
         const sDate = new Date(rec.startDate.getTime() + s.sampleNum * 60000);
-        // Add JST offset (+9h) then format as ISO string — avoids locale/Intl timezone issues
-        const jst = new Date(sDate.getTime() + 9 * 60 * 60 * 1000);
-        dtStr = jst.toISOString().replace('T', ' ').slice(0, 19);
+        const local = new Date(sDate.getTime() + tzOffsetMin * 60 * 1000);
+        dtStr = local.toISOString().replace('T', ' ').slice(0, 19);
         ts = Math.floor(sDate.getTime() / 1000);
       }
-      rows.push([dtStr, ts, rec.index, s.sampleNum, s.hr]);
+      rows.push([dtStr, tzOffsetMin, ts, rec.index, s.sampleNum, s.hr]);
     }
   }
   return '﻿' + rows.map(r => r.join(',')).join('\r\n');
