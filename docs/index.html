@@ -697,10 +697,10 @@ function buildDateList(dateGroups) {
   list.innerHTML = '';
   gDateCheckStates.clear();
 
-  // Sort newest first (dateGroups is already in reverse order from scan, but Map insertion order matters)
+  // Newest date first
   const sorted = [...dateGroups.entries()]
     .filter(([d]) => d !== '__nodate__')
-    .sort(([a],[b]) => a > b ? -1 : 1);
+    .sort((a, b) => a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0);
 
   // Pre-select only the most recent date
   const mostRecentDate = sorted[0]?.[0];
@@ -761,8 +761,11 @@ function buildPeriodList(records) {
   list.innerHTML = '';
 
   const groups = groupByDate(records);
-  for (const [dateStr, items] of [...groups.entries()].sort(([a],[b]) => a > b ? -1 : 1)) {
-    for (const { rec, timeStr } of items) {
+  for (const [dateStr, items] of [...groups.entries()].sort((a, b) => a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0)) {
+    // Newest session first within each date
+    const sortedItems = [...items].sort((x, y) =>
+      (y.rec.startDate?.getTime() ?? 0) - (x.rec.startDate?.getTime() ?? 0));
+    for (const { rec, timeStr } of sortedItems) {
       if (!checkStates.has(rec.index)) checkStates.set(rec.index, true);
       const checked = checkStates.get(rec.index);
       const hrs = rec.samples.map(s => s.hr);
